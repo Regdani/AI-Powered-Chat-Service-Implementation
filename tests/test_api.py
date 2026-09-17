@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_graph
 from app.core.exceptions import ChatServiceError
+from app.graph.builder import build_graph
+from app.llm.mock_chat import FIXED_JOKE, MockChatModel
 from app.main import create_app
 
 
@@ -112,14 +114,19 @@ def test_chat_maps_chat_service_error_status(graph: FakeGraph) -> None:
     assert response.json()["detail"] == "provider unavailable"
 
 
-def test_chat_without_graph_returns_503() -> None:
+def test_chat_compiled_graph_echoes_message_and_joke() -> None:
     application = create_app()
     with TestClient(application) as client:
+        client.app.state.graph = build_graph(llm=MockChatModel())
         health = client.get("/health")
         chat = client.get("/chat", params={"message": "Hello"})
     assert health.status_code == 200
-    assert chat.status_code == 503
-    assert "graph" in chat.json()["detail"].lower()
+    assert chat.status_code == 200
+    body = chat.json()
+    assert set(body) == {"session_id", "answer"}
+    assert "Hello" in body["answer"]
+    assert FIXED_JOKE in body["answer"]
+    assert "language" not in body
 
 
 def test_openapi_documents_chat_query_params() -> None:

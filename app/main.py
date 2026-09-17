@@ -34,7 +34,7 @@ def _try_attach_graph(app: FastAPI) -> None:
         logger.info("Chat graph is not wired yet; GET /health remains available")
         return
 
-    app.state.graph = get_graph()
+    app.state.graph = get_graph(llm=getattr(app.state, "llm", None))
     logger.info("Chat graph attached")
 
 
