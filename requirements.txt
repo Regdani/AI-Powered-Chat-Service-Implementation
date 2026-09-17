@@ -8,3 +8,4 @@ langchain-core==1.6.3
 langgraph==1.2.11
 langchain-openai==1.6.2
 langchain-google-genai==4.4.0
+langchain-mcp-adapters==0.3.2

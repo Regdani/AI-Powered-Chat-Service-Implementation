@@ -27,6 +27,12 @@ from app.graph.nodes import (
 from app.graph.state import GraphState
 from app.llm.mock_chat import FIXED_JOKE, MockChatModel, echo_with_joke
 from app.memory.store import InMemorySessionStore
+from app.tools.mcp_weather import (
+    UNAVAILABLE_PREFIX,
+    WEATHER_TOOL_NAME,
+    configure_weather_client,
+    reset_weather_client,
+)
 from app.tools.megafon import MEGAFON_TOOL_NAME
 
 
@@ -151,6 +157,25 @@ def _megafon_scripted_llm() -> ScriptedChatModel:
                 ],
             ),
             AIMessage(content="You said: HELLO WORLD. " + FIXED_JOKE),
+        ]
+    )
+
+
+def _weather_scripted_llm(final_answer: str) -> ScriptedChatModel:
+    """First turn requests weather; second turn is the final reply."""
+    return ScriptedChatModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": WEATHER_TOOL_NAME,
+                        "args": {"location": "Paris"},
+                        "id": "call_weather_1",
+                    }
+                ],
+            ),
+            AIMessage(content=final_answer),
         ]
     )
 
@@ -359,3 +384,73 @@ def test_graph_megafon_tool_path_logs_example(caplog: Any) -> None:
     assert "megafon-demo" in caplog.text
     assert "Agent reply" in caplog.text
     assert result["final_answer"] in caplog.text
+
+
+def test_mock_llm_does_not_call_weather() -> None:
+    """Default mock has no weather heuristic; echo+joke is not a bug."""
+    graph = _build()
+    result = asyncio.run(graph.ainvoke(_turn("What is the weather in Paris?")))
+    assert not any(getattr(m, "type", None) == "tool" for m in result["messages"])
+    assert result["final_answer"] == echo_with_joke("What is the weather in Paris?")
+
+
+def test_graph_weather_tool_path_with_scripted_llm() -> None:
+    async def call_remote(name: str, arguments: dict[str, Any]) -> Any:
+        if name == "geocode_location":
+            return {
+                "results": [
+                    {"latitude": 48.8566, "longitude": 2.3522, "name": "Paris"}
+                ]
+            }
+        if name == "get_weather_forecast":
+            return {"current_weather": {"temperature": 18.5, "windspeed": 10}}
+        raise AssertionError(name)
+
+    reset_weather_client()
+    configure_weather_client("https://weather.example/mcp", call_remote=call_remote)
+    try:
+        final = "You said: Weather for Paris: temperature 18.5°C. " + FIXED_JOKE
+        llm = _weather_scripted_llm(final)
+        graph = _build(llm)
+        result = asyncio.run(graph.ainvoke(_turn("What is the weather in Paris?")))
+        tool_messages = [
+            m for m in result["messages"] if getattr(m, "type", None) == "tool"
+        ]
+        assert len(tool_messages) == 1
+        assert "Weather for Paris" in tool_messages[0].content
+        assert "18.5" in tool_messages[0].content
+        assert result["final_answer"] == final
+        assert llm._async_calls == 2
+    finally:
+        reset_weather_client()
+
+
+def test_graph_weather_network_error_does_not_crash(caplog: Any) -> None:
+    async def boom(name: str, arguments: dict[str, Any]) -> Any:
+        del name, arguments
+        raise ConnectionError("weather.chukai.io is unreachable")
+
+    reset_weather_client()
+    configure_weather_client("https://weather.example/mcp", call_remote=boom)
+    try:
+        final = "You said: I could not reach the weather service. " + FIXED_JOKE
+        llm = _weather_scripted_llm(final)
+        graph = _build(llm)
+        with caplog.at_level(logging.INFO):
+            result = asyncio.run(
+                graph.ainvoke(
+                    _turn("What is the weather in Paris?", session_id="weather-demo")
+                )
+            )
+        tool_messages = [
+            m for m in result["messages"] if getattr(m, "type", None) == "tool"
+        ]
+        assert len(tool_messages) == 1
+        assert UNAVAILABLE_PREFIX in tool_messages[0].content
+        assert "ConnectionError" in tool_messages[0].content
+        assert result["final_answer"] == final
+        assert "Agent tool calls" in caplog.text
+        assert WEATHER_TOOL_NAME in caplog.text
+        assert "weather-demo" in caplog.text
+    finally:
+        reset_weather_client()

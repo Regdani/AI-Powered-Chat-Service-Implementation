@@ -36,8 +36,10 @@ def build_graph(
 ) -> CompiledStateGraph:
     """Build a compiled graph. Pass ``llm`` / ``store`` from tests to isolate runs.
 
-    ``tools`` defaults to Megafon. The mock LLM ignores bound tools; a real
-    provider or a scripted test LLM is what actually emits ``tool_calls``.
+    ``tools`` defaults to Megafon and the weather MCP wrapper. The mock LLM
+    ignores bound tools; a real provider or a scripted test LLM is what
+    actually emits ``tool_calls``. The weather wrapper is local: MCP is
+    configured at process start and connects only on the first weather call.
     """
 
     chat_model = create_chat_model() if llm is None else llm

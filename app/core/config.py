@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.0-flash"
 
     mcp_weather_url: str = "https://weather.chukai.io/mcp"
+    mcp_weather_transport: str = "streamable_http"
     app_host: str = "0.0.0.0"
     app_port: int = 18080
 

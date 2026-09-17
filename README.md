@@ -39,3 +39,11 @@ INFO [app.tools.megafon] Megafon announce input='Announce: hello world' output='
 INFO [app.graph.nodes] Agent tool calls session_id=megafon-demo names=['megafon']
 INFO [app.graph.nodes] Agent reply session_id=megafon-demo answer=You said: HELLO WORLD. Why did the scarecrow win an award? Because he was outstanding in his field.
 ```
+
+## Weather MCP
+
+The agent can look up weather through a **local wrapper tool** (`get_weather`) that proxies to the public Open-Meteo MCP at `https://weather.chukai.io/mcp` (no API key).
+
+Startup only **configures** the MCP client (`MCP_WEATHER_URL`, `MCP_WEATHER_TRANSPORT`). It does **not** open a remote session and does **not** call `get_tools()` on the network. The first `get_weather` invocation connects lazily (handshake + geocode + forecast). If that remote is down, the tool returns an error string to the agent; the API process, `GET /health`, echo+joke, Megafon, and history keep working.
+
+The default mock LLM does **not** detect weather questions and does **not** emit tool calls. Sending "What's the weather in Paris?" in mock mode returns echo+joke. That is expected. The tool loop is covered by tests with a scripted LLM plus a mocked MCP client, and by a real `LLM_PROVIDER` in a live demo.

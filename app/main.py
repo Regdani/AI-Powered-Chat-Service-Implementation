@@ -48,11 +48,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         from app.core.config import settings
         from app.llm.factory import create_chat_model
+        from app.tools.mcp_weather import configure_weather_client
 
         logger.info("LLM_PROVIDER=%s", settings.llm_provider)
         # Fail fast for unknown / incomplete real-provider config. Never mock.
         app.state.llm = create_chat_model(settings)
         logger.info("LLM client created (%s)", type(app.state.llm).__name__)
+
+        # Config only: URL + transport. No handshake, no get_tools() on the wire.
+        configure_weather_client(
+            url=settings.mcp_weather_url,
+            transport=settings.mcp_weather_transport,
+        )
+        logger.info(
+            "MCP weather configured url=%s transport=%s "
+            "(no remote handshake at startup)",
+            settings.mcp_weather_url,
+            settings.mcp_weather_transport,
+        )
     except ImportError:
         logger.info("Settings or LLM factory not loaded")
 
