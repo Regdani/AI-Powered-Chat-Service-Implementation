@@ -44,12 +44,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "Starting AI-Powered Chat Service (MCP is not connected at startup)"
     )
+    app.state.llm = None
     try:
         from app.core.config import settings
+        from app.llm.factory import create_chat_model
 
-        logger.info("LLM_PROVIDER=%s", getattr(settings, "llm_provider", "mock"))
+        logger.info("LLM_PROVIDER=%s", settings.llm_provider)
+        # Fail fast for unknown / incomplete real-provider config. Never mock.
+        app.state.llm = create_chat_model(settings)
+        logger.info("LLM client created (%s)", type(app.state.llm).__name__)
     except ImportError:
-        logger.info("Settings module not loaded")
+        logger.info("Settings or LLM factory not loaded")
 
     _try_attach_graph(app)
     yield
