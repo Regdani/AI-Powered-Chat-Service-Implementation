@@ -1,4 +1,4 @@
-"""Graph nodes. This slice is START → agent → END (echo + joke)."""
+"""Graph nodes: load history → agent (echo + joke) → save history."""
 
 from __future__ import annotations
 
@@ -11,10 +11,13 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import Runnable
 
 from app.graph.state import GraphState
+from app.memory.store import InMemorySessionStore
 
 logger = logging.getLogger(__name__)
 
+LOAD_HISTORY_NODE = "load_history"
 AGENT_NODE = "agent"
+SAVE_HISTORY_NODE = "save_history"
 
 AGENT_SYSTEM_PROMPT = (
     "You are a chat agent. For every user message you must (1) repeat the "
@@ -70,3 +73,36 @@ def make_agent_node(
         }
 
     return agent
+
+
+def make_load_history_node(store: InMemorySessionStore):
+    """Return an async node that hydrates ``messages`` from the session store."""
+
+    async def load_history(state: GraphState) -> dict[str, Any]:
+        session_id = state["session_id"]
+        messages = await store.get_messages(session_id)
+        logger.debug(
+            "Loaded history session_id=%s message_count=%s",
+            session_id,
+            len(messages),
+        )
+        return {"messages": messages}
+
+    return load_history
+
+
+def make_save_history_node(store: InMemorySessionStore):
+    """Return an async node that persists ``messages`` for this session."""
+
+    async def save_history(state: GraphState) -> dict[str, Any]:
+        session_id = state["session_id"]
+        messages = list(state.get("messages") or [])
+        await store.save_messages(session_id, messages)
+        logger.debug(
+            "Saved history session_id=%s message_count=%s",
+            session_id,
+            len(messages),
+        )
+        return {}
+
+    return save_history

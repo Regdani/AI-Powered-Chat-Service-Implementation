@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 
 import pytest
@@ -12,6 +13,7 @@ from app.core.exceptions import ChatServiceError
 from app.graph.builder import build_graph
 from app.llm.mock_chat import FIXED_JOKE, MockChatModel
 from app.main import create_app
+from app.memory.store import InMemorySessionStore
 
 
 class FakeGraph:
@@ -117,7 +119,9 @@ def test_chat_maps_chat_service_error_status(graph: FakeGraph) -> None:
 def test_chat_compiled_graph_echoes_message_and_joke() -> None:
     application = create_app()
     with TestClient(application) as client:
-        client.app.state.graph = build_graph(llm=MockChatModel())
+        client.app.state.graph = build_graph(
+            llm=MockChatModel(), store=InMemorySessionStore()
+        )
         health = client.get("/health")
         chat = client.get("/chat", params={"message": "Hello"})
     assert health.status_code == 200
@@ -127,6 +131,40 @@ def test_chat_compiled_graph_echoes_message_and_joke() -> None:
     assert "Hello" in body["answer"]
     assert FIXED_JOKE in body["answer"]
     assert "language" not in body
+
+
+def test_chat_generated_session_id_continues_conversation() -> None:
+    store = InMemorySessionStore()
+    application = create_app()
+    with TestClient(application) as client:
+        client.app.state.graph = build_graph(llm=MockChatModel(), store=store)
+        first = client.get("/chat", params={"message": "Hello"})
+        session_id = first.json()["session_id"]
+        second = client.get(
+            "/chat", params={"message": "Again", "session_id": session_id}
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["session_id"] == session_id
+    saved = asyncio.run(store.get_messages(session_id))
+    humans = [m.content for m in saved if getattr(m, "type", None) == "human"]
+    assert humans == ["Hello", "Again"]
+
+
+def test_chat_sessions_do_not_share_history() -> None:
+    store = InMemorySessionStore()
+    application = create_app()
+    with TestClient(application) as client:
+        client.app.state.graph = build_graph(llm=MockChatModel(), store=store)
+        client.get("/chat", params={"message": "Hello", "session_id": "keep-me"})
+        client.get("/chat", params={"message": "Again", "session_id": "keep-me"})
+        client.get("/chat", params={"message": "Other", "session_id": "other"})
+    kept = asyncio.run(store.get_messages("keep-me"))
+    other = asyncio.run(store.get_messages("other"))
+    kept_humans = [m.content for m in kept if getattr(m, "type", None) == "human"]
+    other_humans = [m.content for m in other if getattr(m, "type", None) == "human"]
+    assert kept_humans == ["Hello", "Again"]
+    assert other_humans == ["Other"]
 
 
 def test_openapi_documents_chat_query_params() -> None:

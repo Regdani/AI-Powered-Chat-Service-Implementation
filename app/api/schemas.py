@@ -26,7 +26,8 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(
         default=None,
         description=(
-            "Conversation session identifier. If omitted, the server generates a UUID."
+            "Conversation session identifier. If omitted, the server generates a UUID. "
+            "Pass the same value on later GET /chat calls so history is loaded and saved."
         ),
         examples=["3f1c8a6e-9b2d-4e71-a4c8-1d2e3f4a5b6c"],
     )

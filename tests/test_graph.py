@@ -1,4 +1,4 @@
-"""Graph core: GraphState, START → agent → END, echo+joke, async ainvoke, logging."""
+"""Graph core: GraphState, START → load_history → agent → save_history → END."""
 
 from __future__ import annotations
 
@@ -10,9 +10,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.outputs import ChatResult
 
 from app.graph.builder import build_graph
-from app.graph.nodes import AGENT_NODE, AGENT_SYSTEM_PROMPT
+from app.graph.nodes import (
+    AGENT_NODE,
+    AGENT_SYSTEM_PROMPT,
+    LOAD_HISTORY_NODE,
+    SAVE_HISTORY_NODE,
+)
 from app.graph.state import GraphState
 from app.llm.mock_chat import FIXED_JOKE, MockChatModel, echo_with_joke
+from app.memory.store import InMemorySessionStore
 
 
 def _turn(
@@ -28,6 +34,14 @@ def _turn(
         "messages": [],
         "final_answer": "",
     }
+
+
+def _build(llm: Any = None, store: InMemorySessionStore | None = None):
+    """Compile a graph with a fresh in-memory store unless one is injected."""
+    return build_graph(
+        MockChatModel() if llm is None else llm,
+        store=InMemorySessionStore() if store is None else store,
+    )
 
 
 class CountingMock(MockChatModel):
@@ -67,16 +81,20 @@ def test_graph_state_has_required_fields() -> None:
     }
 
 
-def test_compiled_graph_is_start_agent_end() -> None:
-    graph = build_graph(MockChatModel())
+def test_compiled_graph_loads_and_saves_history() -> None:
+    graph = _build()
+    assert LOAD_HISTORY_NODE in graph.nodes
     assert AGENT_NODE in graph.nodes
+    assert SAVE_HISTORY_NODE in graph.nodes
     edges = {(edge[0], edge[1]) for edge in graph.get_graph().edges}
-    assert ("__start__", AGENT_NODE) in edges
-    assert (AGENT_NODE, "__end__") in edges
+    assert ("__start__", LOAD_HISTORY_NODE) in edges
+    assert (LOAD_HISTORY_NODE, AGENT_NODE) in edges
+    assert (AGENT_NODE, SAVE_HISTORY_NODE) in edges
+    assert (SAVE_HISTORY_NODE, "__end__") in edges
 
 
 def test_agent_echoes_user_text_and_fixed_joke() -> None:
-    graph = build_graph(MockChatModel())
+    graph = _build()
     result = asyncio.run(graph.ainvoke(_turn("Hello there")))
     assert result["final_answer"] == echo_with_joke("Hello there")
     assert "Hello there" in result["final_answer"]
@@ -86,14 +104,14 @@ def test_agent_echoes_user_text_and_fixed_joke() -> None:
 
 def test_agent_uses_async_ainvoke() -> None:
     llm = CountingMock()
-    graph = build_graph(llm)
+    graph = _build(llm)
     asyncio.run(graph.ainvoke(_turn("Ping")))
     assert llm._async_calls >= 1
 
 
 def test_agent_system_prompt_does_not_request_target_language() -> None:
     llm = CountingMock()
-    graph = build_graph(llm)
+    graph = _build(llm)
     asyncio.run(graph.ainvoke(_turn("Szia", language="hu")))
     assert llm._seen
     system = llm._seen[0][0]
@@ -106,7 +124,7 @@ def test_agent_system_prompt_does_not_request_target_language() -> None:
 
 
 def test_agent_appends_human_and_ai_messages() -> None:
-    graph = build_graph(MockChatModel())
+    graph = _build()
     result = asyncio.run(graph.ainvoke(_turn("Hello")))
     messages = result["messages"]
     assert len(messages) >= 2
@@ -117,9 +135,48 @@ def test_agent_appends_human_and_ai_messages() -> None:
 
 
 def test_agent_logs_the_reply(caplog: Any) -> None:
-    graph = build_graph(MockChatModel())
+    graph = _build()
     with caplog.at_level(logging.INFO, logger="app.graph.nodes"):
         result = asyncio.run(graph.ainvoke(_turn("Hello", session_id="log-session")))
     assert "log-session" in caplog.text
     assert result["final_answer"] in caplog.text
     assert "Agent reply" in caplog.text
+
+
+def test_save_history_persists_messages_in_store() -> None:
+    store = InMemorySessionStore()
+    graph = _build(store=store)
+    asyncio.run(graph.ainvoke(_turn("Hello", session_id="s1")))
+    saved = asyncio.run(store.get_messages("s1"))
+    assert len(saved) >= 2
+    assert isinstance(saved[0], HumanMessage)
+    assert saved[0].content == "Hello"
+    assert isinstance(saved[1], AIMessage)
+    assert saved[1].content == echo_with_joke("Hello")
+
+
+def test_second_turn_loads_prior_messages_into_llm() -> None:
+    llm = CountingMock()
+    store = InMemorySessionStore()
+    graph = _build(llm, store)
+    asyncio.run(graph.ainvoke(_turn("Hello", session_id="s1")))
+    asyncio.run(graph.ainvoke(_turn("Follow up", session_id="s1")))
+    assert len(llm._seen) == 2
+    second = llm._seen[1]
+    human_texts = [m.content for m in second if isinstance(m, HumanMessage)]
+    ai_texts = [m.content for m in second if isinstance(m, AIMessage)]
+    assert human_texts[0] == "Hello"
+    assert human_texts[-1] == "Follow up"
+    assert any(FIXED_JOKE in text for text in ai_texts)
+
+
+def test_sessions_do_not_share_history() -> None:
+    llm = CountingMock()
+    store = InMemorySessionStore()
+    graph = _build(llm, store)
+    asyncio.run(graph.ainvoke(_turn("Alpha", session_id="a")))
+    asyncio.run(graph.ainvoke(_turn("Beta", session_id="b")))
+    second = llm._seen[1]
+    human_texts = [m.content for m in second if isinstance(m, HumanMessage)]
+    assert "Alpha" not in human_texts
+    assert human_texts[-1] == "Beta"
