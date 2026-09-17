@@ -1,4 +1,4 @@
-"""Graph core: GraphState, START → load_history → agent → save_history → END."""
+"""Graph core: GraphState, START → load_history → agent ⇄ tools → save_history → END."""
 
 from __future__ import annotations
 
@@ -6,8 +6,14 @@ import asyncio
 import logging
 from typing import Any, get_type_hints
 
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_core.outputs import ChatResult
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import Runnable
 
 from app.graph.builder import build_graph
 from app.graph.nodes import (
@@ -15,10 +21,13 @@ from app.graph.nodes import (
     AGENT_SYSTEM_PROMPT,
     LOAD_HISTORY_NODE,
     SAVE_HISTORY_NODE,
+    TOOLS_NODE,
+    route_after_agent,
 )
 from app.graph.state import GraphState
 from app.llm.mock_chat import FIXED_JOKE, MockChatModel, echo_with_joke
 from app.memory.store import InMemorySessionStore
+from app.tools.megafon import MEGAFON_TOOL_NAME
 
 
 def _turn(
@@ -70,6 +79,82 @@ class CountingMock(MockChatModel):
         )
 
 
+class ScriptedChatModel(BaseChatModel):
+    """Replay canned ``AIMessage``s so tests can drive the tool loop.
+
+    Extra attributes are underscore-prefixed because ``BaseChatModel`` is a
+    Pydantic model and rejects undeclared public fields.
+    """
+
+    def __init__(self, responses: list[AIMessage]) -> None:
+        super().__init__()
+        self._responses = list(responses)
+        self._index = 0
+        self._async_calls = 0
+        self._seen: list[list[BaseMessage]] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-test"
+
+    def bind_tools(
+        self,
+        tools: Any,
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable:
+        del tools, tool_choice, kwargs
+        return self
+
+    def _next(self) -> AIMessage:
+        if self._index >= len(self._responses):
+            raise AssertionError("ScriptedChatModel has no remaining responses")
+        message = self._responses[self._index]
+        self._index += 1
+        return message
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del stop, run_manager, kwargs
+        return ChatResult(generations=[ChatGeneration(message=self._next())])
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self._async_calls += 1
+        self._seen.append(list(messages))
+        return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
+def _megafon_scripted_llm() -> ScriptedChatModel:
+    """First turn requests Megafon; second turn is the final echo+joke reply."""
+    return ScriptedChatModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": MEGAFON_TOOL_NAME,
+                        "args": {"text": "Announce: hello world"},
+                        "id": "call_megafon_1",
+                    }
+                ],
+            ),
+            AIMessage(content="You said: HELLO WORLD. " + FIXED_JOKE),
+        ]
+    )
+
+
 def test_graph_state_has_required_fields() -> None:
     hints = get_type_hints(GraphState, include_extras=True)
     assert set(hints) == {
@@ -85,10 +170,13 @@ def test_compiled_graph_loads_and_saves_history() -> None:
     graph = _build()
     assert LOAD_HISTORY_NODE in graph.nodes
     assert AGENT_NODE in graph.nodes
+    assert TOOLS_NODE in graph.nodes
     assert SAVE_HISTORY_NODE in graph.nodes
     edges = {(edge[0], edge[1]) for edge in graph.get_graph().edges}
     assert ("__start__", LOAD_HISTORY_NODE) in edges
     assert (LOAD_HISTORY_NODE, AGENT_NODE) in edges
+    assert (AGENT_NODE, TOOLS_NODE) in edges
+    assert (TOOLS_NODE, AGENT_NODE) in edges
     assert (AGENT_NODE, SAVE_HISTORY_NODE) in edges
     assert (SAVE_HISTORY_NODE, "__end__") in edges
 
@@ -180,3 +268,94 @@ def test_sessions_do_not_share_history() -> None:
     human_texts = [m.content for m in second if isinstance(m, HumanMessage)]
     assert "Alpha" not in human_texts
     assert human_texts[-1] == "Beta"
+
+
+def test_mock_llm_does_not_call_megafon_for_announce() -> None:
+    """Default mock has no Announce: heuristic; echo+joke is not a bug."""
+    graph = _build()
+    result = asyncio.run(graph.ainvoke(_turn("Announce: hello world")))
+    assert not any(getattr(m, "type", None) == "tool" for m in result["messages"])
+    assert result["final_answer"] == echo_with_joke("Announce: hello world")
+
+
+def test_route_after_agent_uses_tool_calls() -> None:
+    with_tools: GraphState = {
+        "messages": [
+            HumanMessage(content="Announce: hi"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": MEGAFON_TOOL_NAME,
+                        "args": {"text": "Announce: hi"},
+                        "id": "c1",
+                    }
+                ],
+            ),
+        ],
+        "user_message": "Announce: hi",
+        "language": "en",
+        "session_id": "s",
+        "final_answer": "",
+    }
+    without_tools: GraphState = {
+        "messages": [
+            HumanMessage(content="Hello"),
+            AIMessage(content=echo_with_joke("Hello")),
+        ],
+        "user_message": "Hello",
+        "language": "en",
+        "session_id": "s",
+        "final_answer": echo_with_joke("Hello"),
+    }
+    assert route_after_agent(with_tools) == TOOLS_NODE
+    assert route_after_agent(without_tools) == SAVE_HISTORY_NODE
+
+
+def test_graph_megafon_tool_path_with_scripted_llm() -> None:
+    llm = _megafon_scripted_llm()
+    store = InMemorySessionStore()
+    graph = _build(llm, store)
+    result = asyncio.run(graph.ainvoke(_turn("Announce: hello world")))
+
+    tool_messages = [m for m in result["messages"] if getattr(m, "type", None) == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].content == "HELLO WORLD"
+    assert result["final_answer"] == "You said: HELLO WORLD. " + FIXED_JOKE
+    assert llm._async_calls == 2
+    assert llm._index == 2
+
+    second = llm._seen[1]
+    assert any(getattr(m, "type", None) == "tool" for m in second)
+    humans = [m.content for m in second if isinstance(m, HumanMessage)]
+    assert humans[-1] == "Announce: hello world"
+
+    saved = asyncio.run(store.get_messages("session-1"))
+    saved_types = [getattr(m, "type", None) for m in saved]
+    assert "tool" in saved_types
+    assert saved_types[-1] == "ai"
+
+
+def test_scripted_tool_followup_does_not_duplicate_human_message() -> None:
+    llm = _megafon_scripted_llm()
+    graph = _build(llm)
+    asyncio.run(graph.ainvoke(_turn("Announce: hello world")))
+    second = llm._seen[1]
+    human_contents = [m.content for m in second if isinstance(m, HumanMessage)]
+    assert human_contents.count("Announce: hello world") == 1
+
+
+def test_graph_megafon_tool_path_logs_example(caplog: Any) -> None:
+    llm = _megafon_scripted_llm()
+    graph = _build(llm)
+    with caplog.at_level(logging.INFO):
+        result = asyncio.run(
+            graph.ainvoke(_turn("Announce: hello world", session_id="megafon-demo"))
+        )
+    assert "Megafon announce" in caplog.text
+    assert "HELLO WORLD" in caplog.text
+    assert "Agent tool calls" in caplog.text
+    assert MEGAFON_TOOL_NAME in caplog.text
+    assert "megafon-demo" in caplog.text
+    assert "Agent reply" in caplog.text
+    assert result["final_answer"] in caplog.text

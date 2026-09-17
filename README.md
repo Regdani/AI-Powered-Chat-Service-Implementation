@@ -25,3 +25,17 @@ This in-memory store is for **demo / prototype** use only. It is not a productio
 ### Production alternatives
 
 Replace the in-memory dict with a shared store such as **Redis**, **Azure Cosmos DB**, or **PostgreSQL**, or persist graph state with a LangGraph **checkpointer** so history survives restarts and is visible to every instance.
+
+## Megafon tool
+
+The Megafon tool uppercases the text after `Announce:`. That conversion is the **tool's** job, not the mock LLM's.
+
+The default mock LLM does **not** detect `Announce:` and does **not** emit tool calls. Sending `Announce: hello` in mock mode returns echo+joke. That is expected. The tool loop is covered by tests with a scripted LLM (`AIMessage` + `tool_calls`) and by a real `LLM_PROVIDER` in a live demo.
+
+Example log from the scripted tool path:
+
+```
+INFO [app.tools.megafon] Megafon announce input='Announce: hello world' output='HELLO WORLD'
+INFO [app.graph.nodes] Agent tool calls session_id=megafon-demo names=['megafon']
+INFO [app.graph.nodes] Agent reply session_id=megafon-demo answer=You said: HELLO WORLD. Why did the scarecrow win an award? Because he was outstanding in his field.
+```
