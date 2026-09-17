@@ -1,4 +1,4 @@
-"""Compile the chat graph: START → load_history → agent ⇄ tools → save_history → END."""
+"""Compile the chat graph: START → load_history → agent ⇄ tools → translate → save → END."""
 
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ from app.graph.nodes import (
     LOAD_HISTORY_NODE,
     SAVE_HISTORY_NODE,
     TOOLS_NODE,
+    TRANSLATE_NODE,
     make_agent_node,
     make_load_history_node,
     make_save_history_node,
+    make_translate_node,
     route_after_agent,
 )
 from app.graph.state import GraphState
@@ -40,6 +42,10 @@ def build_graph(
     ignores bound tools; a real provider or a scripted test LLM is what
     actually emits ``tool_calls``. The weather wrapper is local: MCP is
     configured at process start and connects only on the first weather call.
+
+    The translate node is a separate graph step (``language`` on GraphState)
+    so the agent never translates. English / empty answers skip the extra LLM
+    call.
     """
 
     chat_model = create_chat_model() if llm is None else llm
@@ -48,6 +54,7 @@ def build_graph(
     graph = StateGraph(GraphState)
     graph.add_node(LOAD_HISTORY_NODE, make_load_history_node(session_store))
     graph.add_node(AGENT_NODE, make_agent_node(chat_model, tools=bound_tools))
+    graph.add_node(TRANSLATE_NODE, make_translate_node(chat_model))
     graph.add_node(SAVE_HISTORY_NODE, make_save_history_node(session_store))
     graph.add_edge(START, LOAD_HISTORY_NODE)
     graph.add_edge(LOAD_HISTORY_NODE, AGENT_NODE)
@@ -56,11 +63,12 @@ def build_graph(
         graph.add_conditional_edges(
             AGENT_NODE,
             route_after_agent,
-            {TOOLS_NODE: TOOLS_NODE, SAVE_HISTORY_NODE: SAVE_HISTORY_NODE},
+            {TOOLS_NODE: TOOLS_NODE, TRANSLATE_NODE: TRANSLATE_NODE},
         )
         graph.add_edge(TOOLS_NODE, AGENT_NODE)
     else:
-        graph.add_edge(AGENT_NODE, SAVE_HISTORY_NODE)
+        graph.add_edge(AGENT_NODE, TRANSLATE_NODE)
+    graph.add_edge(TRANSLATE_NODE, SAVE_HISTORY_NODE)
     graph.add_edge(SAVE_HISTORY_NODE, END)
     return graph.compile()
 

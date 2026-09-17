@@ -133,6 +133,22 @@ def test_chat_compiled_graph_echoes_message_and_joke() -> None:
     assert "language" not in body
 
 
+def test_chat_compiled_graph_mock_language_prefix() -> None:
+    application = create_app()
+    with TestClient(application) as client:
+        client.app.state.graph = build_graph(
+            llm=MockChatModel(), store=InMemorySessionStore()
+        )
+        chat = client.get("/chat", params={"message": "Hello", "language": "hu"})
+    assert chat.status_code == 200
+    body = chat.json()
+    assert set(body) == {"session_id", "answer"}
+    assert body["answer"].startswith("[hu] ")
+    assert "Hello" in body["answer"]
+    assert FIXED_JOKE in body["answer"]
+    assert "language" not in body
+
+
 def test_chat_generated_session_id_continues_conversation() -> None:
     store = InMemorySessionStore()
     application = create_app()

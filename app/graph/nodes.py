@@ -1,4 +1,4 @@
-"""Graph nodes: load history → agent (echo + joke, optional tools) → save history."""
+"""Graph nodes: load history → agent (echo + joke, optional tools) → translate → save."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import Runnable
 
 from app.graph.state import GraphState
+from app.llm.mock_chat import MockChatModel, mock_language_marker
 from app.memory.store import InMemorySessionStore
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 LOAD_HISTORY_NODE = "load_history"
 AGENT_NODE = "agent"
 TOOLS_NODE = "tools"
+TRANSLATE_NODE = "translate"
 SAVE_HISTORY_NODE = "save_history"
+
+DEFAULT_LANGUAGE = "en"
 
 AGENT_SYSTEM_PROMPT = (
     "You are a chat agent. For every user message you must (1) repeat the "
@@ -28,6 +32,12 @@ AGENT_SYSTEM_PROMPT = (
     "weather, call the get_weather tool with the location and include the "
     "result in your reply. Do not translate or rewrite the reply into a "
     "requested language; another graph node handles language."
+)
+
+TRANSLATE_SYSTEM_PROMPT = (
+    "You are a translator. Translate the text into the language identified "
+    "by this language code: {language}. Return only the translated text. "
+    "Do not add a joke, preface, or explanation."
 )
 
 
@@ -64,6 +74,21 @@ def _tool_call_names(message: AIMessage) -> list[str]:
     return names
 
 
+def normalize_language(language: str | None) -> str:
+    """Return a lowercase language code; blank values become ``en``."""
+    if language is None:
+        return DEFAULT_LANGUAGE
+    stripped = str(language).strip().lower()
+    return stripped or DEFAULT_LANGUAGE
+
+
+def needs_translation(language: str | None, text: str | None) -> bool:
+    """True when the translate node should run (non-English with text)."""
+    if not (text or "").strip():
+        return False
+    return normalize_language(language) != DEFAULT_LANGUAGE
+
+
 def route_after_agent(state: GraphState) -> str:
     """Route to tools when the last AI message requested tool calls."""
     messages = state.get("messages") or []
@@ -71,7 +96,18 @@ def route_after_agent(state: GraphState) -> str:
         last = messages[-1]
         if getattr(last, "tool_calls", None):
             return TOOLS_NODE
-    return SAVE_HISTORY_NODE
+    return TRANSLATE_NODE
+
+
+def _answer_from_state(state: GraphState) -> str:
+    answer = state.get("final_answer") or ""
+    if answer.strip():
+        return answer
+    messages = state.get("messages") or []
+    for message in reversed(messages):
+        if isinstance(message, AIMessage) and not getattr(message, "tool_calls", None):
+            return _message_text(message)
+    return ""
 
 
 def make_agent_node(
@@ -141,6 +177,68 @@ def make_load_history_node(store: InMemorySessionStore):
         return {"messages": messages}
 
     return load_history
+
+
+def make_translate_node(llm: BaseChatModel):
+    """Return an async node that is the only place ``language`` is applied.
+
+    English (default) or an empty answer is a no-op: no extra LLM call.
+    Any other language makes **one** translator call on the agent's finished
+    reply. The mock LLM is not asked to translate; it only gets a ``[hu] ``
+    style prefix so the node can be tested without a real model.
+
+    History is left in the agent's original language so the next turn is not
+    double-translated and the agent never sees a target-language instruction.
+    """
+
+    async def translate(state: GraphState) -> dict[str, Any]:
+        language = normalize_language(state.get("language"))
+        answer = _answer_from_state(state)
+        session_id = state.get("session_id")
+
+        if not needs_translation(language, answer):
+            logger.debug(
+                "Translate skip session_id=%s language=%s",
+                session_id,
+                language,
+            )
+            return {"final_answer": answer}
+
+        if isinstance(llm, MockChatModel):
+            tagged = mock_language_marker(answer, language)
+            logger.info(
+                "Translate mock marker session_id=%s language=%s answer=%s",
+                session_id,
+                language,
+                tagged,
+            )
+            return {"final_answer": tagged}
+
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content=TRANSLATE_SYSTEM_PROMPT.format(language=language)),
+                HumanMessage(content=answer),
+            ]
+        )
+        translated = _message_text(response).strip()
+        if not translated:
+            logger.warning(
+                "Translate produced empty output session_id=%s language=%s; "
+                "keeping the agent reply",
+                session_id,
+                language,
+            )
+            return {"final_answer": answer}
+
+        logger.info(
+            "Translate applied session_id=%s language=%s answer=%s",
+            session_id,
+            language,
+            translated,
+        )
+        return {"final_answer": translated}
+
+    return translate
 
 
 def make_save_history_node(store: InMemorySessionStore):

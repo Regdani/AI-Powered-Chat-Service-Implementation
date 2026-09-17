@@ -29,6 +29,16 @@ def echo_with_joke(user_text: str) -> str:
     return f"You said: {user_text}. {FIXED_JOKE}"
 
 
+def mock_language_marker(text: str, language: str) -> str:
+    """Deterministic language tag used by the translate node in mock mode.
+
+    This is not a translation. Real ``LLM_PROVIDER`` values run an actual
+    translator LLM call; mock only prefixes so the node can be tested.
+    """
+    code = language.strip().lower()
+    return f"[{code}] {text}"
+
+
 def _as_text(content: Any) -> str:
     if isinstance(content, str):
         return content

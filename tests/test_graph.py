@@ -1,4 +1,4 @@
-"""Graph core: GraphState, START → load_history → agent ⇄ tools → save_history → END."""
+"""Graph core: GraphState, START → load_history → agent ⇄ tools → translate → save → END."""
 
 from __future__ import annotations
 
@@ -22,10 +22,20 @@ from app.graph.nodes import (
     LOAD_HISTORY_NODE,
     SAVE_HISTORY_NODE,
     TOOLS_NODE,
+    TRANSLATE_NODE,
+    TRANSLATE_SYSTEM_PROMPT,
+    make_translate_node,
+    needs_translation,
+    normalize_language,
     route_after_agent,
 )
 from app.graph.state import GraphState
-from app.llm.mock_chat import FIXED_JOKE, MockChatModel, echo_with_joke
+from app.llm.mock_chat import (
+    FIXED_JOKE,
+    MockChatModel,
+    echo_with_joke,
+    mock_language_marker,
+)
 from app.memory.store import InMemorySessionStore
 from app.tools.mcp_weather import (
     UNAVAILABLE_PREFIX,
@@ -196,13 +206,15 @@ def test_compiled_graph_loads_and_saves_history() -> None:
     assert LOAD_HISTORY_NODE in graph.nodes
     assert AGENT_NODE in graph.nodes
     assert TOOLS_NODE in graph.nodes
+    assert TRANSLATE_NODE in graph.nodes
     assert SAVE_HISTORY_NODE in graph.nodes
     edges = {(edge[0], edge[1]) for edge in graph.get_graph().edges}
     assert ("__start__", LOAD_HISTORY_NODE) in edges
     assert (LOAD_HISTORY_NODE, AGENT_NODE) in edges
     assert (AGENT_NODE, TOOLS_NODE) in edges
     assert (TOOLS_NODE, AGENT_NODE) in edges
-    assert (AGENT_NODE, SAVE_HISTORY_NODE) in edges
+    assert (AGENT_NODE, TRANSLATE_NODE) in edges
+    assert (TRANSLATE_NODE, SAVE_HISTORY_NODE) in edges
     assert (SAVE_HISTORY_NODE, "__end__") in edges
 
 
@@ -225,8 +237,8 @@ def test_agent_uses_async_ainvoke() -> None:
 def test_agent_system_prompt_does_not_request_target_language() -> None:
     llm = CountingMock()
     graph = _build(llm)
-    asyncio.run(graph.ainvoke(_turn("Szia", language="hu")))
-    assert llm._seen
+    result = asyncio.run(graph.ainvoke(_turn("Szia", language="hu")))
+    assert llm._async_calls == 1
     system = llm._seen[0][0]
     assert isinstance(system, SystemMessage)
     assert system.content == AGENT_SYSTEM_PROMPT
@@ -234,6 +246,9 @@ def test_agent_system_prompt_does_not_request_target_language() -> None:
     assert "translate" in system.content.lower()
     human = [m for m in llm._seen[0] if isinstance(m, HumanMessage)]
     assert human[-1].content == "Szia"
+    assert result["final_answer"] == mock_language_marker(
+        echo_with_joke("Szia"), "hu"
+    )
 
 
 def test_agent_appends_human_and_ai_messages() -> None:
@@ -334,7 +349,7 @@ def test_route_after_agent_uses_tool_calls() -> None:
         "final_answer": echo_with_joke("Hello"),
     }
     assert route_after_agent(with_tools) == TOOLS_NODE
-    assert route_after_agent(without_tools) == SAVE_HISTORY_NODE
+    assert route_after_agent(without_tools) == TRANSLATE_NODE
 
 
 def test_graph_megafon_tool_path_with_scripted_llm() -> None:
@@ -359,6 +374,39 @@ def test_graph_megafon_tool_path_with_scripted_llm() -> None:
     saved_types = [getattr(m, "type", None) for m in saved]
     assert "tool" in saved_types
     assert saved_types[-1] == "ai"
+
+
+def test_graph_tool_path_then_one_translator_call() -> None:
+    """START → agent → tools → agent → translate → END; agent still does not translate."""
+    shouted = "You said: HELLO WORLD. " + FIXED_JOKE
+    translated = "Te mondtad: HELLO WORLD."
+    llm = ScriptedChatModel(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": MEGAFON_TOOL_NAME,
+                        "args": {"text": "Announce: hello world"},
+                        "id": "call_megafon_1",
+                    }
+                ],
+            ),
+            AIMessage(content=shouted),
+            AIMessage(content=translated),
+        ]
+    )
+    graph = _build(llm)
+    result = asyncio.run(
+        graph.ainvoke(_turn("Announce: hello world", language="hu"))
+    )
+    assert llm._async_calls == 3
+    assert result["final_answer"] == translated
+    for agent_call in llm._seen[:2]:
+        assert agent_call[0].content == AGENT_SYSTEM_PROMPT
+        assert "hu" not in agent_call[0].content.lower()
+    assert llm._seen[2][0].content == TRANSLATE_SYSTEM_PROMPT.format(language="hu")
+    assert llm._seen[2][1].content == shouted
 
 
 def test_scripted_tool_followup_does_not_duplicate_human_message() -> None:
@@ -454,3 +502,126 @@ def test_graph_weather_network_error_does_not_crash(caplog: Any) -> None:
         assert "weather-demo" in caplog.text
     finally:
         reset_weather_client()
+
+
+def _translate_state(
+    *,
+    language: str,
+    final_answer: str,
+    session_id: str = "s",
+) -> GraphState:
+    return {
+        "messages": [AIMessage(content=final_answer)] if final_answer else [],
+        "user_message": "Hello",
+        "language": language,
+        "session_id": session_id,
+        "final_answer": final_answer,
+    }
+
+
+def test_normalize_language_defaults_blank_to_english() -> None:
+    assert normalize_language(None) == "en"
+    assert normalize_language("  ") == "en"
+    assert normalize_language("HU") == "hu"
+
+
+def test_needs_translation_skips_english_and_empty_text() -> None:
+    assert needs_translation("en", "Hello") is False
+    assert needs_translation("EN", "Hello") is False
+    assert needs_translation("hu", "") is False
+    assert needs_translation("hu", "Hello") is True
+
+
+def test_translate_node_skips_llm_for_english() -> None:
+    llm = ScriptedChatModel([])
+    node = make_translate_node(llm)
+    result = asyncio.run(node(_translate_state(language="en", final_answer="Hello")))
+    assert result["final_answer"] == "Hello"
+    assert llm._async_calls == 0
+
+
+def test_translate_node_skips_llm_when_there_is_nothing_to_translate() -> None:
+    llm = ScriptedChatModel([])
+    node = make_translate_node(llm)
+    result = asyncio.run(node(_translate_state(language="hu", final_answer="")))
+    assert result["final_answer"] == ""
+    assert llm._async_calls == 0
+
+
+def test_translate_node_mock_prefixes_without_llm_call() -> None:
+    llm = CountingMock()
+    node = make_translate_node(llm)
+    result = asyncio.run(
+        node(_translate_state(language="hu", final_answer="You said: Hello."))
+    )
+    assert result["final_answer"] == "[hu] You said: Hello."
+    assert llm._async_calls == 0
+
+
+def test_translate_node_makes_one_llm_call_for_other_language() -> None:
+    llm = ScriptedChatModel([AIMessage(content="Szia ott.")])
+    node = make_translate_node(llm)
+    result = asyncio.run(
+        node(_translate_state(language="hu", final_answer=echo_with_joke("Hello")))
+    )
+    assert result["final_answer"] == "Szia ott."
+    assert llm._async_calls == 1
+    seen = llm._seen[0]
+    assert isinstance(seen[0], SystemMessage)
+    assert seen[0].content == TRANSLATE_SYSTEM_PROMPT.format(language="hu")
+    assert isinstance(seen[1], HumanMessage)
+    assert seen[1].content == echo_with_joke("Hello")
+
+
+def test_graph_english_does_not_call_translator() -> None:
+    llm = ScriptedChatModel([AIMessage(content=echo_with_joke("Hello"))])
+    graph = _build(llm)
+    result = asyncio.run(graph.ainvoke(_turn("Hello", language="en")))
+    assert llm._async_calls == 1
+    assert result["final_answer"] == echo_with_joke("Hello")
+    assert not result["final_answer"].startswith("[en]")
+
+
+def test_graph_non_english_makes_one_translator_call() -> None:
+    translated = "Szia ott."
+    llm = ScriptedChatModel(
+        [
+            AIMessage(content=echo_with_joke("Hello")),
+            AIMessage(content=translated),
+        ]
+    )
+    graph = _build(llm)
+    result = asyncio.run(graph.ainvoke(_turn("Hello", language="hu")))
+    assert llm._async_calls == 2
+    assert result["final_answer"] == translated
+    agent_system = llm._seen[0][0]
+    assert isinstance(agent_system, SystemMessage)
+    assert agent_system.content == AGENT_SYSTEM_PROMPT
+    assert "hu" not in agent_system.content.lower()
+    translator = llm._seen[1]
+    assert translator[0].content == TRANSLATE_SYSTEM_PROMPT.format(language="hu")
+    assert translator[1].content == echo_with_joke("Hello")
+    assert result["messages"][-1].content == echo_with_joke("Hello")
+
+
+def test_graph_mock_language_prefix_is_not_real_translation() -> None:
+    graph = _build()
+    result = asyncio.run(graph.ainvoke(_turn("Hello", language="hu")))
+    expected = mock_language_marker(echo_with_joke("Hello"), "hu")
+    assert result["final_answer"] == expected
+    assert result["messages"][-1].content == echo_with_joke("Hello")
+
+
+def test_graph_mock_english_has_no_language_prefix() -> None:
+    graph = _build()
+    result = asyncio.run(graph.ainvoke(_turn("Hello", language="EN")))
+    assert result["final_answer"] == echo_with_joke("Hello")
+
+
+def test_translate_keeps_history_in_agent_language() -> None:
+    store = InMemorySessionStore()
+    graph = _build(store=store)
+    asyncio.run(graph.ainvoke(_turn("Hello", language="hu", session_id="s1")))
+    saved = asyncio.run(store.get_messages("s1"))
+    assert saved[-1].content == echo_with_joke("Hello")
+    assert not str(saved[-1].content).startswith("[hu]")
