@@ -107,7 +107,6 @@ LLM_PROVIDER=azure
 AZURE_OPENAI_API_KEY=your-azure-key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_DEPLOYMENT=your-deployment-name
-AZURE_OPENAI_API_VERSION=2024-10-21
 ```
 
 Startup fails fast if any of the required Azure variables are missing.
