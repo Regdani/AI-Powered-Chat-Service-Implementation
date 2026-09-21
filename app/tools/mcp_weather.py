@@ -107,9 +107,16 @@ class WeatherMcpClient:
             geo_payload, forecast_payload = await self._geocode_and_forecast(place)
             coords = _coordinates_from_geocode(geo_payload)
             if coords is None:
-                return f"Weather MCP found no coordinates for {place!r}."
-            _latitude, _longitude, name = coords
-            return _format_forecast(forecast_payload, location=name or place)
+                result = f"Weather MCP found no coordinates for {place!r}."
+            else:
+                _latitude, _longitude, name = coords
+                result = _format_forecast(forecast_payload, location=name or place)
+            logger.info(
+                "Weather MCP tool result source=mcp location=%r output=%r",
+                place,
+                result,
+            )
+            return result
         except Exception as exc:
             logger.warning(
                 "Weather MCP lookup failed location=%r error=%s",

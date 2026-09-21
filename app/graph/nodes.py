@@ -29,9 +29,14 @@ AGENT_SYSTEM_PROMPT = (
     "user's text back and (2) add a short joke. If the user wants something "
     "announced (text after 'Announce:'), call the megafon tool with that text "
     "and include the shouted result in your reply. If the user asks about "
-    "weather, call the get_weather tool with the location and include the "
-    "result in your reply. Do not translate or rewrite the reply into a "
-    "requested language; another graph node handles language."
+    "current weather, call the get_weather tool with the location and include "
+    "the result in your reply. When the user asks about previous messages, "
+    "use only the conversation history of the current session. If the "
+    "requested information is not available in the conversation history, "
+    "explicitly state that you don't have that information. Do not call "
+    "external tools to reconstruct or guess information from previous "
+    "messages. Do not translate or rewrite the reply into a requested "
+    "language; another graph node handles language."
 )
 
 TRANSLATE_SYSTEM_PROMPT = (

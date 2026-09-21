@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-10-21"
 
     google_api_key: str | None = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     mcp_weather_url: str = "https://weather.chukai.io/mcp"
     mcp_weather_transport: str = "streamable_http"

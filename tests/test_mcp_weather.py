@@ -193,6 +193,18 @@ def test_lookup_logs_lazy_connect_and_errors(caplog: Any) -> None:
     assert "Weather MCP lookup failed" in caplog.text
 
 
+def test_lookup_logs_mcp_tool_result(caplog: Any) -> None:
+    remote, _calls = _scripted_remote()
+    client = configure_weather_client(
+        "https://weather.example/mcp", call_remote=remote
+    )
+    with caplog.at_level(logging.INFO, logger="app.tools.mcp_weather"):
+        result = asyncio.run(client.lookup("Paris"))
+    assert "Weather MCP tool result source=mcp" in caplog.text
+    assert "18.5" in caplog.text
+    assert result in caplog.text
+
+
 def test_real_session_path_opens_session_only_on_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
