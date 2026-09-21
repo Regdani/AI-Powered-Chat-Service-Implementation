@@ -38,11 +38,52 @@ async def health() -> HealthResponse:
         422: {"description": "Missing or invalid query parameters."},
         502: {
             "model": ErrorResponse,
-            "description": "LLM or graph failure while producing a reply.",
+            "description": (
+                "LLM or graph failure while producing a reply. "
+                "Typical causes: provider auth/network errors, or an empty "
+                "agent answer."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "llm_failure": {
+                            "summary": "LLM provider failed",
+                            "value": {
+                                "detail": (
+                                    "The language model failed to produce a "
+                                    "response: 401 Client Error: Unauthorized"
+                                )
+                            },
+                        },
+                        "empty_reply": {
+                            "summary": "Empty agent reply",
+                            "value": {
+                                "detail": "The agent produced an empty response."
+                            },
+                        },
+                    }
+                }
+            },
         },
         503: {
             "model": ErrorResponse,
-            "description": "Chat graph is not available.",
+            "description": (
+                "Chat graph is not available. ``GET /health`` may still "
+                "return 200, but ``GET /chat`` cannot run until the graph "
+                "is wired."
+            ),
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "graph_missing": {
+                            "summary": "Graph not configured",
+                            "value": {
+                                "detail": "Chat graph is not configured."
+                            },
+                        }
+                    }
+                }
+            },
         },
     },
     tags=["chat"],

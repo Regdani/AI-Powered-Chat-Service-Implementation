@@ -21,11 +21,8 @@ class Settings(BaseSettings):
 
     llm_provider: str = Field(
         default="mock",
-        description="LLM backend: mock (default), openai, azure, or gemini.",
+        description="LLM backend: mock (default), azure, or gemini.",
     )
-
-    openai_api_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
 
     azure_openai_api_key: str | None = None
     azure_openai_endpoint: str | None = None

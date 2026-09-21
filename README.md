@@ -98,9 +98,21 @@ GEMINI_MODEL=gemini-3.1-flash-lite
 
 3. Restart uvicorn. Startup **fails fast** if `LLM_PROVIDER=gemini` and `GOOGLE_API_KEY` is missing — there is no silent fallback to mock.
 
-`GEMINI_MODEL` defaults to `gemini-3.1-flash-lite` when unset. Other supported providers: `mock` (default), `openai`, `azure` — see `.env.example` for their variables.
+`GEMINI_MODEL` defaults to `gemini-3.1-flash-lite` when unset. Other supported providers: `mock` (default) and `azure` — see `.env.example` for Azure variables.
 
-With Gemini (or any real provider), the model can call tools (`megafon`, `get_weather`) according to the system prompt. Joke wording varies by model; small flash models often reuse common dad jokes.
+## Configure Azure OpenAI
+
+```env
+LLM_PROVIDER=azure
+AZURE_OPENAI_API_KEY=your-azure-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT=your-deployment-name
+AZURE_OPENAI_API_VERSION=2024-10-21
+```
+
+Startup fails fast if any of the required Azure variables are missing.
+
+With Gemini or Azure, the model can call tools (`megafon`, `get_weather`) according to the system prompt. Joke wording varies by model; small flash models often reuse common dad jokes.
 
 ## Announce (Megafon tool)
 
@@ -110,7 +122,7 @@ To shout text, include the `Announce:` prefix in the message. The **megafon** to
 curl "http://localhost:18080/chat?message=Announce:%20hello%20world&session_id=megafon-demo"
 ```
 
-Expected behaviour with a **real** LLM (`gemini`, `openai`, …):
+Expected behaviour with a **real** LLM (`gemini` or `azure`):
 
 1. The agent calls `megafon` with the announcement text.
 2. The tool returns e.g. `HELLO WORLD`.

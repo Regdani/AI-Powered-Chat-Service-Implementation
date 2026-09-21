@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_openai import AzureChatOpenAI
 
 from app.core.config import Settings
 from app.core.exceptions import ProviderConfigError
@@ -22,7 +22,6 @@ def _settings(**kwargs: object) -> Settings:
     """
     values: dict[str, object] = {
         "llm_provider": "mock",
-        "openai_api_key": None,
         "azure_openai_api_key": None,
         "azure_openai_endpoint": None,
         "azure_openai_deployment": None,
@@ -83,15 +82,13 @@ def test_unknown_provider_fails_fast_without_mock_fallback() -> None:
     assert "will not fall back" in str(exc_info.value)
 
 
-def test_openai_missing_key_fails_fast() -> None:
-    with pytest.raises(ProviderConfigError, match="OPENAI_API_KEY") as exc_info:
-        create_chat_model(_settings(llm_provider="openai", openai_api_key=None))
+def test_removed_openai_provider_fails_as_unknown() -> None:
+    with pytest.raises(ProviderConfigError, match="openai") as exc_info:
+        create_chat_model(_settings(llm_provider="openai"))
     assert "will not fall back" in str(exc_info.value)
-
-
-def test_openai_blank_key_fails_fast() -> None:
-    with pytest.raises(ProviderConfigError, match="OPENAI_API_KEY"):
-        create_chat_model(_settings(llm_provider="openai", openai_api_key="  "))
+    assert "mock" in str(exc_info.value)
+    assert "azure" in str(exc_info.value)
+    assert "gemini" in str(exc_info.value)
 
 
 def test_azure_missing_env_lists_each_variable() -> None:
@@ -115,19 +112,6 @@ def test_azure_partial_config_still_fails_fast() -> None:
         )
 
 
-def test_gemini_missing_key_fails_fast() -> None:
-    with pytest.raises(ProviderConfigError, match="GOOGLE_API_KEY"):
-        create_chat_model(_settings(llm_provider="gemini", google_api_key=None))
-
-
-def test_openai_with_key_does_not_return_mock() -> None:
-    model = create_chat_model(
-        _settings(llm_provider="openai", openai_api_key="sk-test")
-    )
-    assert isinstance(model, ChatOpenAI)
-    assert not isinstance(model, MockChatModel)
-
-
 def test_azure_with_full_config_does_not_return_mock() -> None:
     model = create_chat_model(
         _settings(
@@ -139,6 +123,11 @@ def test_azure_with_full_config_does_not_return_mock() -> None:
     )
     assert isinstance(model, AzureChatOpenAI)
     assert not isinstance(model, MockChatModel)
+
+
+def test_gemini_missing_key_fails_fast() -> None:
+    with pytest.raises(ProviderConfigError, match="GOOGLE_API_KEY"):
+        create_chat_model(_settings(llm_provider="gemini", google_api_key=None))
 
 
 def test_gemini_with_key_does_not_return_mock() -> None:

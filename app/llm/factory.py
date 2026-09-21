@@ -15,7 +15,7 @@ from app.core.config import Settings, settings as default_settings
 from app.core.exceptions import ProviderConfigError
 from app.llm.mock_chat import MockChatModel
 
-SUPPORTED_PROVIDERS = ("mock", "openai", "azure", "gemini")
+SUPPORTED_PROVIDERS = ("mock", "azure", "gemini")
 
 _NO_MOCK_FALLBACK = "The process will not fall back to the mock LLM."
 
@@ -41,18 +41,6 @@ def _require(provider: str, required: Mapping[str, str | None]) -> None:
             f"LLM_PROVIDER={provider} is missing required environment "
             f"variable(s): {', '.join(missing)}. {_NO_MOCK_FALLBACK}"
         )
-
-
-def _create_openai(cfg: Settings) -> BaseChatModel:
-    _require("openai", {"OPENAI_API_KEY": cfg.openai_api_key})
-    try:
-        from langchain_openai import ChatOpenAI
-    except ImportError as exc:
-        raise ProviderConfigError(
-            "LLM_PROVIDER=openai requires the langchain-openai package. "
-            f"{_NO_MOCK_FALLBACK}"
-        ) from exc
-    return ChatOpenAI(model=cfg.openai_model, api_key=cfg.openai_api_key)
 
 
 def _create_azure(cfg: Settings) -> BaseChatModel:
@@ -105,8 +93,6 @@ def create_chat_model(settings: Settings | None = None) -> BaseChatModel:
 
     if provider == "mock":
         return MockChatModel()
-    if provider == "openai":
-        return _create_openai(cfg)
     if provider == "azure":
         return _create_azure(cfg)
     if provider == "gemini":

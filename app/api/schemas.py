@@ -76,6 +76,17 @@ class HealthResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """JSON body for mapped chat / LLM failures."""
+    """JSON body for mapped chat / LLM failures (``502`` / ``503``)."""
 
-    detail: str = Field(..., description="Human-readable error message.")
+    detail: str = Field(
+        ...,
+        description=(
+            "Human-readable explanation of the failure. Clients should show "
+            "or log this string; it is not a machine-stable error code."
+        ),
+        examples=[
+            "The language model failed to produce a response: 401 Unauthorized",
+            "The agent produced an empty response.",
+            "Chat graph is not configured.",
+        ],
+    )
