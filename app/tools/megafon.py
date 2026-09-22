@@ -36,7 +36,7 @@ def announce_upper(text: str) -> str:
 
 
 @tool(MEGAFON_TOOL_NAME)
-def megafon(text: str) -> str:
+async def megafon(text: str) -> str:
     """Shout text through a megafon by uppercasing the part after 'Announce:'.
 
     Pass the raw user message (including the Announce: prefix) or the payload

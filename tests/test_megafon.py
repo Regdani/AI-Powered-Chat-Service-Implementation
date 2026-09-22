@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -35,13 +36,16 @@ def test_text_before_prefix_is_ignored() -> None:
     assert announce_upper("please Announce: doors closing") == "DOORS CLOSING"
 
 
-def test_tool_name_and_invoke() -> None:
+def test_tool_name_and_ainvoke() -> None:
     assert megafon.name == MEGAFON_TOOL_NAME
-    assert megafon.invoke({"text": "Announce: hello world"}) == "HELLO WORLD"
+    assert (
+        asyncio.run(megafon.ainvoke({"text": "Announce: hello world"}))
+        == "HELLO WORLD"
+    )
 
 
-def test_tool_invoke_without_prefix() -> None:
-    assert megafon.invoke({"text": "loud enough"}) == "LOUD ENOUGH"
+def test_tool_ainvoke_without_prefix() -> None:
+    assert asyncio.run(megafon.ainvoke({"text": "loud enough"})) == "LOUD ENOUGH"
 
 
 def test_megafon_logs_input_and_output(caplog: Any) -> None:
