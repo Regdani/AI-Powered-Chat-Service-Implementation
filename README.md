@@ -45,12 +45,6 @@ docker run --rm -p 18080:18080 --env-file .env ai-chat-service   # with .env
 docker run --rm -p 18080:18080 ai-chat-service                   # defaults / mock
 ```
 
-## Deployment
-
-High-level CI/CD and Azure Container Apps strategy: [docs/deployment.md](docs/deployment.md).
-
-CI (GitHub Actions on `master`): `pytest` + `docker build` — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
 ## HTTP APIs
 
 ### `GET /health`
