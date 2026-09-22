@@ -77,7 +77,15 @@ def test_chat_happy_path_generates_session_id(client: TestClient, graph: FakeGra
     assert "Hello there" in body["answer"]
     assert "language" not in body
     assert graph.calls[0]["user_message"] == "Hello there"
-    assert graph.calls[0]["language"] == "en"
+    assert graph.calls[0]["language"] == ""
+
+
+def test_chat_blank_language_means_no_translation(
+    client: TestClient, graph: FakeGraph
+) -> None:
+    response = client.get("/chat", params={"message": "Szia", "language": "  "})
+    assert response.status_code == 200
+    assert graph.calls[0]["language"] == ""
 
 
 def test_chat_uses_provided_session_and_language(client: TestClient, graph: FakeGraph) -> None:

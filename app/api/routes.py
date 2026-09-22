@@ -90,8 +90,9 @@ async def health() -> HealthResponse:
     summary="Send a message to the agent",
     description=(
         "Runs one turn of the LangGraph agent. Echo + joke is agent behaviour, "
-        "not a separate response field. ``language`` is applied inside the graph "
-        "and is not returned. Pass ``session_id`` to continue a conversation; "
+        "not a separate response field. Optional ``language`` is applied inside "
+        "the graph only when provided; omit it to keep the agent's reply language. "
+        "It is not returned. Pass ``session_id`` to continue a conversation; "
         "omit it to start a new one."
     ),
 )
@@ -104,7 +105,7 @@ async def chat(
         result = await graph.ainvoke(
             {
                 "user_message": params.message,
-                "language": params.language,
+                "language": params.language or "",
                 "session_id": session_id,
                 "messages": [],
                 "final_answer": "",

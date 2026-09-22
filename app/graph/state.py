@@ -11,8 +11,9 @@ from langgraph.graph.message import add_messages
 class GraphState(TypedDict):
     """Custom graph state required by the spec.
 
-    ``language`` is applied only by the translate node. The agent node does
-    not use it to choose a reply language, so translation is never done twice.
+    ``language`` is applied only by the translate node when non-empty. The
+    agent node does not use it to choose a reply language, so translation is
+    never done twice. Blank / omitted means no translation.
     """
 
     messages: Annotated[list[AnyMessage], add_messages]

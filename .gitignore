@@ -26,9 +26,10 @@ docker-compose.override.yml
 .cursor/
 .cursorignore
 
-# IDEs
+# IDEs / local history
 .idea/
 .vscode/
+.history/
 
 # OS
 Thumbs.db

@@ -22,8 +22,6 @@ TOOLS_NODE = "tools"
 TRANSLATE_NODE = "translate"
 SAVE_HISTORY_NODE = "save_history"
 
-DEFAULT_LANGUAGE = "en"
-
 AGENT_SYSTEM_PROMPT = (
     "You are a chat agent. For every user message you must (1) repeat the "
     "user's text back and (2) add a short joke. If the user wants something "
@@ -80,18 +78,21 @@ def _tool_call_names(message: AIMessage) -> list[str]:
 
 
 def normalize_language(language: str | None) -> str:
-    """Return a lowercase language code; blank values become ``en``."""
+    """Return a lowercase language code, or empty string when omitted / blank."""
     if language is None:
-        return DEFAULT_LANGUAGE
-    stripped = str(language).strip().lower()
-    return stripped or DEFAULT_LANGUAGE
+        return ""
+    return str(language).strip().lower()
 
 
 def needs_translation(language: str | None, text: str | None) -> bool:
-    """True when the translate node should run (non-English with text)."""
+    """True when a language code is set and there is text to translate.
+
+    Blank / omitted ``language`` means no translation: the agent reply stays
+    as produced (usually matching the user message language).
+    """
     if not (text or "").strip():
         return False
-    return normalize_language(language) != DEFAULT_LANGUAGE
+    return bool(normalize_language(language))
 
 
 def route_after_agent(state: GraphState) -> str:
@@ -187,10 +188,12 @@ def make_load_history_node(store: InMemorySessionStore):
 def make_translate_node(llm: BaseChatModel):
     """Return an async node that is the only place ``language`` is applied.
 
-    English (default) or an empty answer is a no-op: no extra LLM call.
-    Any other language makes **one** translator call on the agent's finished
-    reply. The mock LLM is not asked to translate; it only gets a ``[hu] ``
-    style prefix so the node can be tested without a real model.
+    Blank / omitted ``language`` or an empty answer is a no-op: no extra LLM
+    call. A non-empty language code makes **one** translator call on the
+    agent's finished reply (including ``en``).
+
+    The mock LLM is not asked to translate; it only gets a ``[hu] `` style
+    prefix so the node can be tested without a real model.
 
     History is left in the agent's original language so the next turn is not
     double-translated and the agent never sees a target-language instruction.
@@ -205,7 +208,7 @@ def make_translate_node(llm: BaseChatModel):
             logger.debug(
                 "Translate skip session_id=%s language=%s",
                 session_id,
-                language,
+                language or "(none)",
             )
             return {"final_answer": answer}
 

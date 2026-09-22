@@ -70,7 +70,7 @@ The agent echoes the user text and adds a short joke. Tools (Megafon, weather) r
 | Parameter     | Required | Default | Description |
 |---------------|----------|---------|-------------|
 | `message`     | yes      | —       | User text sent to the agent (non-blank). |
-| `language`    | no       | `en`    | Desired reply language code (e.g. `en`, `hu`). Applied inside the graph; not returned in the body. English skips the extra LLM translate call. |
+| `language`    | no       | —       | Optional reply language code (e.g. `en`, `hu`). Omit or leave blank for no translation (agent replies in the user's language when it can). When set, the translate node rewrites the reply into that language. |
 | `session_id`  | no       | new UUID| Continue an existing conversation. Omit (or blank) to start a new session. |
 
 #### Response (`200`)
@@ -83,7 +83,7 @@ The agent echoes the user text and adds a short joke. Tools (Megafon, weather) r
 ```
 
 - `session_id` — value to reuse on later turns (client-supplied or newly generated).
-- `answer` — agent reply for this turn (echo + joke, plus any tool output; translated when `language` ≠ `en`).
+- `answer` — agent reply for this turn (echo + joke, plus any tool output; translated only when `language` is set).
 
 #### Errors
 
@@ -96,11 +96,14 @@ The agent echoes the user text and adds a short joke. Tools (Megafon, weather) r
 #### Examples
 
 ```bash
-# New session (English)
+# New session (no language → no translation; agent follows the user message)
 curl "http://localhost:18080/chat?message=Hello"
 
-# Hungarian reply
+# Force Hungarian reply
 curl "http://localhost:18080/chat?message=Szia&language=hu"
+
+# Force English reply even if the user wrote Hungarian
+curl "http://localhost:18080/chat?message=Szia&language=en"
 
 # Continue a session
 curl "http://localhost:18080/chat?message=What%20did%20I%20just%20say%3F&session_id=YOUR_SESSION_ID"

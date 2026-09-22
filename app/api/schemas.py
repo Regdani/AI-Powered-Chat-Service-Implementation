@@ -14,12 +14,13 @@ class ChatRequest(BaseModel):
         description="User message sent to the agent.",
         examples=["Hello there"],
     )
-    language: str = Field(
-        default="en",
-        min_length=1,
+    language: str | None = Field(
+        default=None,
         description=(
-            "Desired response language. Applied inside the graph (GraphState / "
-            "translate node). Not echoed in the response body."
+            "Optional desired response language code (e.g. en, hu). When omitted "
+            "or blank, no translation runs and the agent replies in the language "
+            "of the user message when possible. When set, the translate node "
+            "rewrites the reply into that language. Not echoed in the response body."
         ),
         examples=["en", "hu"],
     )
@@ -32,7 +33,7 @@ class ChatRequest(BaseModel):
         examples=["3f1c8a6e-9b2d-4e71-a4c8-1d2e3f4a5b6c"],
     )
 
-    @field_validator("message", "language", mode="before")
+    @field_validator("message", mode="before")
     @classmethod
     def strip_required_text(cls, value: object) -> object:
         if isinstance(value, str):
@@ -42,9 +43,9 @@ class ChatRequest(BaseModel):
             return stripped
         return value
 
-    @field_validator("session_id", mode="before")
+    @field_validator("language", "session_id", mode="before")
     @classmethod
-    def blank_session_becomes_none(cls, value: object) -> object:
+    def blank_optional_becomes_none(cls, value: object) -> object:
         if isinstance(value, str):
             stripped = value.strip()
             return stripped or None

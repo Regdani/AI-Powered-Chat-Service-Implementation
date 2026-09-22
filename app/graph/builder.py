@@ -44,8 +44,9 @@ def build_graph(
     configured at process start and connects only on the first weather call.
 
     The translate node is a separate graph step (``language`` on GraphState)
-    so the agent never translates. English / empty answers skip the extra LLM
-    call.
+    so the agent never translates. Translation runs only when ``language`` is
+    a non-empty code and the agent produced text; otherwise the reply language
+    is left to the agent (typically matching the user message).
     """
 
     chat_model = create_chat_model() if llm is None else llm
