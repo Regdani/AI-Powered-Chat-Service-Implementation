@@ -30,3 +30,33 @@ jobs:
 
       - name: Build image
         run: docker build -t ai-chat-service:${{ github.sha }} .
+
+      - name: Start container and verify health
+        run: |
+          set -euo pipefail
+          docker run -d --name ai-chat-ci \
+            -p 18080:18080 \
+            -e LLM_PROVIDER=mock \
+            ai-chat-service:${{ github.sha }}
+
+          echo "Waiting for GET /health..."
+          for i in $(seq 1 30); do
+            if curl -sf "http://127.0.0.1:18080/health" | jq -e '.status == "ok"' > /dev/null; then
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Container failed to become healthy"
+              docker logs ai-chat-ci || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs ai-chat-ci || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f ai-chat-ci || true
