@@ -24,6 +24,27 @@ uvicorn app.main:app --host 0.0.0.0 --port 18080
 
 With no real provider configured, `LLM_PROVIDER=mock` is the default (deterministic echo + fixed joke; no tool calls).
 
+## Docker
+
+Build and run the API in a container (port **18080**):
+
+```bash
+docker compose up --build
+```
+
+- Loads `.env` automatically when present; if missing, the app uses built-in defaults (`LLM_PROVIDER=mock`, `APP_HOST=0.0.0.0`, `APP_PORT=18080`).
+- The image does **not** bake in `.env` — secrets stay on the host via Compose `env_file`.
+- Health: `GET /health` (also used by the image `HEALTHCHECK`).
+- Docs: http://localhost:18080/docs
+
+Equivalent without Compose:
+
+```bash
+docker build -t ai-chat-service .
+docker run --rm -p 18080:18080 --env-file .env ai-chat-service   # with .env
+docker run --rm -p 18080:18080 ai-chat-service                   # defaults / mock
+```
+
 ## HTTP APIs
 
 ### `GET /health`

@@ -19,6 +19,9 @@ htmlcov/
 # Secrets — keep .env.example tracked
 .env
 
+# Docker
+docker-compose.override.yml
+
 # Cursor
 .cursor/
 .cursorignore

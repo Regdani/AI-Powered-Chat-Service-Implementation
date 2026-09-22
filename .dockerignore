@@ -1,0 +1,40 @@
+# Git / IDE / local env
+.git
+.github
+.cursor
+.cursorignore
+.idea
+.vscode
+.env
+*.md
+
+# Python caches and virtualenvs
+.venv
+venv
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+.eggs
+dist
+build
+
+# Tests and tooling (not needed at runtime)
+tests
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.ruff.toml
+pytest.ini
+conftest.py
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker (avoid recursive / local override noise)
+Dockerfile
+.dockerignore
+docker-compose*.yml

@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    image: ai-chat-service
+    ports:
+      - "18080:18080"
+    env_file:
+      - path: .env
+        required: false
