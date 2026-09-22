@@ -16,12 +16,16 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from app.core.config import (
+    DEFAULT_MCP_WEATHER_TRANSPORT,
+    DEFAULT_MCP_WEATHER_URL,
+    settings,
+)
+
 logger = logging.getLogger(__name__)
 
 WEATHER_TOOL_NAME = "get_weather"
 WEATHER_MCP_SERVER_NAME = "weather"
-DEFAULT_WEATHER_MCP_URL = "https://weather.chukai.io/mcp"
-DEFAULT_TRANSPORT = "streamable_http"
 GEOCODE_REMOTE_TOOL = "geocode_location"
 FORECAST_REMOTE_TOOL = "get_weather_forecast"
 UNAVAILABLE_PREFIX = "Weather MCP is unavailable"
@@ -40,8 +44,8 @@ class WeatherMcpClient:
 
     def __init__(
         self,
-        url: str,
-        transport: str = DEFAULT_TRANSPORT,
+        url: str = DEFAULT_MCP_WEATHER_URL,
+        transport: str = DEFAULT_MCP_WEATHER_TRANSPORT,
         *,
         call_remote: RemoteCall | None = None,
     ) -> None:
@@ -128,40 +132,34 @@ class WeatherMcpClient:
     async def _geocode_and_forecast(self, place: str) -> tuple[Any, Any]:
         """Handshake (if needed), geocode, then forecast. Raises on transport errors."""
         if self._call_remote is not None:
-            geo_payload = _as_payload(
-                await self._call_remote(
-                    GEOCODE_REMOTE_TOOL, {"name": place, "count": 1}
-                )
-            )
-            coords = _coordinates_from_geocode(geo_payload)
-            if coords is None:
-                return geo_payload, None
-            latitude, longitude, _name = coords
-            forecast_payload = _as_payload(
-                await self._call_remote(
-                    FORECAST_REMOTE_TOOL,
-                    _forecast_args(latitude, longitude),
-                )
-            )
-            return geo_payload, forecast_payload
+            return await self._run_geocode_and_forecast(self._call_remote, place)
 
         async with self._session() as session:
-            geo_payload = _as_payload(
-                await session.call_tool(
-                    GEOCODE_REMOTE_TOOL, {"name": place, "count": 1}
-                )
+
+            async def call_tool(name: str, arguments: dict[str, Any]) -> Any:
+                return await session.call_tool(name, arguments)
+
+            return await self._run_geocode_and_forecast(call_tool, place)
+
+    async def _run_geocode_and_forecast(
+        self,
+        call_tool: RemoteCall,
+        place: str,
+    ) -> tuple[Any, Any]:
+        geo_payload = _as_payload(
+            await call_tool(GEOCODE_REMOTE_TOOL, {"name": place, "count": 1})
+        )
+        coords = _coordinates_from_geocode(geo_payload)
+        if coords is None:
+            return geo_payload, None
+        latitude, longitude, _name = coords
+        forecast_payload = _as_payload(
+            await call_tool(
+                FORECAST_REMOTE_TOOL,
+                _forecast_args(latitude, longitude),
             )
-            coords = _coordinates_from_geocode(geo_payload)
-            if coords is None:
-                return geo_payload, None
-            latitude, longitude, _name = coords
-            forecast_payload = _as_payload(
-                await session.call_tool(
-                    FORECAST_REMOTE_TOOL,
-                    _forecast_args(latitude, longitude),
-                )
-            )
-            return geo_payload, forecast_payload
+        )
+        return geo_payload, forecast_payload
 
 
 def _forecast_args(latitude: float, longitude: float) -> dict[str, Any]:
@@ -267,29 +265,26 @@ def _format_forecast(payload: Any, *, location: str) -> str:
 
 
 def configure_weather_client(
-    url: str = DEFAULT_WEATHER_MCP_URL,
-    transport: str = DEFAULT_TRANSPORT,
+    url: str | None = None,
+    transport: str | None = None,
     *,
     call_remote: RemoteCall | None = None,
 ) -> WeatherMcpClient:
     """Store MCP client config for this process. Does not handshake."""
     global _client
-    _client = WeatherMcpClient(url, transport, call_remote=call_remote)
+    _client = WeatherMcpClient(
+        url if url is not None else settings.mcp_weather_url,
+        transport if transport is not None else settings.mcp_weather_transport,
+        call_remote=call_remote,
+    )
     _client.attach_adapter()
     return _client
 
 
 def get_weather_client() -> WeatherMcpClient:
     """Return the process-wide client, configuring it from settings if needed."""
-    global _client
     if _client is None:
-        from app.core.config import settings
-
-        _client = WeatherMcpClient(
-            url=settings.mcp_weather_url,
-            transport=settings.mcp_weather_transport,
-        )
-        _client.attach_adapter()
+        return configure_weather_client()
     return _client
 
 

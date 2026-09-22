@@ -1,75 +1,54 @@
 """FastAPI application entrypoint.
 
-Lifespan configures logging only. It does **not** open a connection to the
-remote weather MCP — that happens lazily on the first weather tool call.
+Lifespan configures logging, the LLM, weather MCP client config, and the chat
+graph. It does **not** open a connection to the remote weather MCP — that
+happens lazily on the first weather tool call.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.routes import router
+from app.core.config import settings
 from app.core.exceptions import ChatServiceError, ProviderConfigError
 from app.core.logging import setup_logging
+from app.graph.builder import get_graph
+from app.llm.factory import create_chat_model
+from app.tools.mcp_weather import configure_weather_client
 
 logger = logging.getLogger(__name__)
 
 
-def _try_attach_graph(app: FastAPI) -> None:
-    """Compile the chat graph at startup when the graph package is present.
-
-    Fail-fast for an explicit real LLM provider happens inside the LLM factory
-    / graph builder. If those modules are not imported yet, ``GET /health``
-    still works and ``GET /chat`` returns 503 until they are wired.
-    """
-    app.state.graph = None
-    try:
-        from app.graph.builder import get_graph
-    except ImportError:
-        logger.info("Chat graph is not wired yet; GET /health remains available")
-        return
-
-    app.state.graph = get_graph(llm=getattr(app.state, "llm", None))
-    logger.info("Chat graph attached")
-
-
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     logger.info(
         "Starting AI-Powered Chat Service (MCP is not connected at startup)"
     )
-    app.state.llm = None
-    try:
-        from app.core.config import settings
-        from app.llm.factory import create_chat_model
-        from app.tools.mcp_weather import configure_weather_client
 
-        logger.info("LLM_PROVIDER=%s", settings.llm_provider)
-        # Fail fast for unknown / incomplete real-provider config. Never mock.
-        app.state.llm = create_chat_model(settings)
-        logger.info("LLM client created (%s)", type(app.state.llm).__name__)
+    # Fail fast for unknown / incomplete real-provider config. Never mock.
+    app.state.llm = create_chat_model(settings)
+    logger.info(
+        "LLM_PROVIDER=%s client=%s",
+        settings.llm_provider,
+        type(app.state.llm).__name__,
+    )
 
-        # Config only: URL + transport. No handshake, no get_tools() on the wire.
-        configure_weather_client(
-            url=settings.mcp_weather_url,
-            transport=settings.mcp_weather_transport,
-        )
-        logger.info(
-            "MCP weather configured url=%s transport=%s "
-            "(no remote handshake at startup)",
-            settings.mcp_weather_url,
-            settings.mcp_weather_transport,
-        )
-    except ImportError:
-        logger.info("Settings or LLM factory not loaded")
+    # Config only: URL + transport. No handshake, no get_tools() on the wire.
+    configure_weather_client(
+        url=settings.mcp_weather_url,
+        transport=settings.mcp_weather_transport,
+    )
 
-    _try_attach_graph(app)
+    app.state.graph = get_graph(llm=app.state.llm)
+    logger.info("Chat graph attached")
+
     yield
     logger.info("Shutting down AI-Powered Chat Service")
 

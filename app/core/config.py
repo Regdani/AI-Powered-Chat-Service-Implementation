@@ -9,6 +9,10 @@ from __future__ import annotations
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Single source for weather MCP defaults (Settings fields + tool module).
+DEFAULT_MCP_WEATHER_URL = "https://weather.chukai.io/mcp"
+DEFAULT_MCP_WEATHER_TRANSPORT = "streamable_http"
+
 
 class Settings(BaseSettings):
     """Runtime configuration from environment variables and optional ``.env``."""
@@ -32,8 +36,8 @@ class Settings(BaseSettings):
     google_api_key: str | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
 
-    mcp_weather_url: str = "https://weather.chukai.io/mcp"
-    mcp_weather_transport: str = "streamable_http"
+    mcp_weather_url: str = DEFAULT_MCP_WEATHER_URL
+    mcp_weather_transport: str = DEFAULT_MCP_WEATHER_TRANSPORT
     app_host: str = "0.0.0.0"
     app_port: int = 18080
 

@@ -74,9 +74,13 @@ def build_graph(
 
 
 def get_graph(llm: BaseChatModel | None = None) -> CompiledStateGraph:
-    """Return the process-wide compiled graph, creating it on first use."""
+    """Return the process-wide compiled graph, creating it on first use.
+
+    When ``llm`` is passed (startup / tests), rebuild so the attached model is
+    the one the caller configured. Bare calls reuse the cached graph.
+    """
 
     global _compiled_graph
-    if _compiled_graph is None:
+    if _compiled_graph is None or llm is not None:
         _compiled_graph = build_graph(llm)
     return _compiled_graph

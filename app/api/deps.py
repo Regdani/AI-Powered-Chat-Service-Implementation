@@ -7,8 +7,6 @@ from typing import Any, Protocol
 
 from fastapi import Request
 
-from app.core.exceptions import ChatServiceError
-
 
 class ChatGraph(Protocol):
     """Compiled LangGraph (or test double) used by ``GET /chat``."""
@@ -23,23 +21,16 @@ class ChatGraph(Protocol):
 
 
 def get_graph(request: Request) -> ChatGraph:
-    """Return the compiled graph, loading it lazily on first chat request.
+    """Return the compiled chat graph from ``app.state``.
 
-    Startup must not depend on the remote weather MCP. The graph object is
-    expected to bind tools that connect lazily. Missing graph wiring is a 503
-    rather than a crash of ``GET /health``.
+    Lifespan attaches the graph at startup. This dependency rebuilds it on
+    first ``GET /chat`` only if ``app.state.graph`` is still unset (fallback).
     """
     graph = getattr(request.app.state, "graph", None)
     if graph is not None:
         return graph
 
-    try:
-        from app.graph.builder import get_graph as load_graph
-    except ImportError as exc:
-        raise ChatServiceError(
-            "Chat graph is not configured.",
-            status_code=503,
-        ) from exc
+    from app.graph.builder import get_graph as load_graph
 
     graph = load_graph()
     request.app.state.graph = graph

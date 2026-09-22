@@ -18,9 +18,11 @@ from app.llm.mock_chat import FIXED_JOKE, MockChatModel, echo_with_joke
 from app.main import create_app
 from app.memory.store import InMemorySessionStore
 from app.tools import default_tools
+from app.core.config import (
+    DEFAULT_MCP_WEATHER_TRANSPORT,
+    DEFAULT_MCP_WEATHER_URL,
+)
 from app.tools.mcp_weather import (
-    DEFAULT_TRANSPORT,
-    DEFAULT_WEATHER_MCP_URL,
     FORECAST_REMOTE_TOOL,
     GEOCODE_REMOTE_TOOL,
     UNAVAILABLE_PREFIX,
@@ -97,7 +99,9 @@ def test_configure_builds_adapter_without_session_or_get_tools(
     monkeypatch.setattr(MultiServerMCPClient, "get_tools", boom_get_tools)
     monkeypatch.setattr(MultiServerMCPClient, "session", boom_session)
 
-    client = configure_weather_client(DEFAULT_WEATHER_MCP_URL, DEFAULT_TRANSPORT)
+    client = configure_weather_client(
+        DEFAULT_MCP_WEATHER_URL, DEFAULT_MCP_WEATHER_TRANSPORT
+    )
     assert client.connect_attempts == 0
     assert client._adapter_client is not None
     assert events == []
@@ -230,7 +234,7 @@ def test_real_session_path_opens_session_only_on_lookup(
 
     monkeypatch.setattr(MultiServerMCPClient, "session", fake_session)
 
-    client = WeatherMcpClient(DEFAULT_WEATHER_MCP_URL)
+    client = WeatherMcpClient(DEFAULT_MCP_WEATHER_URL)
     client.attach_adapter()
     assert opened == []
     assert client.connect_attempts == 0
@@ -265,6 +269,10 @@ def test_startup_does_not_handshake_and_health_stays_up(
 
     monkeypatch.setattr(MultiServerMCPClient, "get_tools", boom_get_tools)
     monkeypatch.setattr(MultiServerMCPClient, "session", boom_session)
+    # Isolate from a real LLM_PROVIDER in the developer's .env.
+    monkeypatch.setattr(
+        "app.main.create_chat_model", lambda _settings=None: MockChatModel()
+    )
 
     application = create_app()
     with TestClient(application) as client:
